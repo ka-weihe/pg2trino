@@ -1,0 +1,217 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
+	_ "github.com/trinodb/trino-go-client/trino"
+)
+
+// waitForTrinoInitialization checks if Trino is fully initialized by polling the /v1/info endpoint
+func waitForTrinoInitialization(infoURL string) error {
+	for i := 0; i < 60; i++ {
+		resp, err := http.Get(infoURL)
+		if err != nil {
+			log.Printf("Waiting for Trino server to start... Retrying")
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		var info struct {
+			Starting bool `json:"starting"`
+		}
+
+		if err := json.Unmarshal(body, &info); err != nil {
+			return err
+		}
+
+		if !info.Starting {
+			return nil // Trino has finished starting
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("trino server did not initialize in time")
+}
+
+var db *sql.DB
+
+func main() {
+	ctx := context.Background()
+
+	// Define the Trino container request
+	req := testcontainers.ContainerRequest{
+		Image:        "trinodb/trino",
+		ExposedPorts: []string{"8080/tcp"},
+		WaitingFor:   wait.ForListeningPort("8080/tcp"),
+		Env:          map[string]string{},
+	}
+
+	// Start the Trino container
+	trinoContainer, err := testcontainers.GenericContainer(
+		ctx,
+		testcontainers.GenericContainerRequest{
+			ContainerRequest: req,
+			Started:          true,
+		},
+	)
+	if err != nil {
+		log.Fatalf("Failed to start container: %s", err)
+	}
+	defer trinoContainer.Terminate(ctx)
+
+	// Get the container's mapped port
+	mappedPort, err := trinoContainer.MappedPort(ctx, "8080")
+	if err != nil {
+		log.Fatalf("Failed to get mapped port: %s", err)
+	}
+
+	// Build the DSN (Data Source Name)
+	hostname := "localhost"
+	catalog := "memory"
+	schema := "default"
+	dsn := fmt.Sprintf("http://user@%s:%s?catalog=%s&schema=%s", hostname, mappedPort, catalog, schema)
+
+	// Open a connection to Trino
+	db, err = sql.Open("trino", dsn)
+	if err != nil {
+		log.Fatalf("Failed to open connection to Trino: %s", err)
+	}
+	defer db.Close()
+
+	// Polling the Trino server to check if it's fully initialized
+	err = waitForTrinoInitialization(fmt.Sprintf("http://localhost:%s/v1/info", mappedPort.Port()))
+	if err != nil {
+		log.Fatalf("Trino server initialization check failed: %s", err)
+	}
+
+	// Use db to interact with Trino, for example, to create a table and insert data
+	_, err = db.Exec("CREATE SCHEMA IF NOT EXISTS test")
+	if err != nil {
+		log.Fatalf("Failed to create schema: %s", err)
+	}
+
+	// Boolean
+	// BOOLEAN
+	// Integer
+	// TINYINT
+	// SMALLINT
+	// INTEGER or INT
+	// BIGINT
+	// Floating-point
+	// REAL
+	// DOUBLE
+	// Exact numeric
+	// DECIMAL
+	// String
+	// VARCHAR
+	// CHAR
+	// VARBINARY
+	// JSON
+	// Date and time
+	// DATE
+	// TIME
+	// TIME(P)
+	// TIME WITH TIME ZONE
+	// TIMESTAMP
+	// TIMESTAMP(P)
+	// TIMESTAMP WITH TIME ZONE
+	// TIMESTAMP(P) WITH TIME ZONE
+	// INTERVAL YEAR TO MONTH
+	// INTERVAL DAY TO SECOND
+	// Create table with all types
+
+	// ARRAY
+	// MAP
+	// ROW
+	// Network address
+	// IPADDRESS
+	// UUID
+	// UUID
+	// HyperLogLog
+	// HyperLogLog
+	// P4HyperLogLog
+	// SetDigest
+	// SetDigest
+	// Quantile digest
+	// QDigest
+
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS test.my_table ( " +
+		"bool_col BOOLEAN, " +
+		"tinyint_col TINYINT, " +
+		"smallint_col SMALLINT, " +
+		"int_col INT, " +
+		"bigint_col BIGINT, " +
+		"real_col REAL, " +
+		"double_col DOUBLE, " +
+		"decimal_col DECIMAL, " +
+		"varchar_col VARCHAR, " +
+		"char_col CHAR(4), " +
+		"varbinary_col VARBINARY, " +
+		"json_col JSON, " +
+		"date_col DATE," +
+		"time_col TIME," +
+		"timep_col TIME(3)," +
+		"timez_col TIME WITH TIME ZONE," +
+		"timestamp_col TIMESTAMP," +
+		"timestampp_col TIMESTAMP(3)," +
+		"timestampz_col TIMESTAMP WITH TIME ZONE," +
+		"timestampzp_col TIMESTAMP(3) WITH TIME ZONE," +
+		"intervalym_col INTERVAL YEAR TO MONTH," +
+		"intervalds_col INTERVAL DAY TO SECOND," +
+		"array_col ARRAY<INTEGER>," +
+		"map_col MAP<INTEGER, VARCHAR>" +
+		")")
+	if err != nil {
+		log.Fatalf("Failed to create table: %s", err)
+	}
+
+	// Insert data
+	_, err = db.Exec("INSERT INTO test.my_table VALUES (" +
+		"true, " +
+		"1, " +
+		"2, " +
+		"3, " +
+		"4, " +
+		"5.5, " +
+		"6.6, " +
+		"7.7, " +
+		"'varchar', " +
+		"'char', " +
+		"X'65683F', " +
+		"JSON '{\"key\": \"value\"}', " +
+		"date '2021-01-01'," +
+		"time '12:00:00'," +
+		"time '12:00:00.123'," +
+		"time '01:02:03.456 -08:00'," +
+		"timestamp '2021-01-01 12:00:00'," +
+		"timestamp '2021-01-01 12:00:00.123'," +
+		"timestamp '2001-08-22 03:04:05 UTC'," +
+		"timestamp '2021-01-01 12:00:00.123 UTC'," +
+		"interval '1' MONTH," +
+		"interval '2' DAY," +
+		"ARRAY[1, 2, 3]," +
+		"MAP(ARRAY[1, 2, 3], ARRAY['one', 'two', 'three'])" +
+		")")
+	if err != nil {
+		log.Fatalf("Failed to insert into table: %s", err)
+	}
+
+	fmt.Println(mappedPort)
+	// Keep running
+	select {}
+}
