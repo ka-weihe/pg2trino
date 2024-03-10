@@ -62,7 +62,7 @@ func convertTrinoTypeToOid(trinoType reflect.Type) oid.Oid {
 	case reflect.TypeOf(sql.NullFloat64{}):
 		return oid.T_float8
 	case reflect.TypeOf(sql.NullTime{}):
-		return oid.T_time
+		return oid.T_timestamp
 	default:
 		// For other types, return type as text/string
 		return oid.T_text
